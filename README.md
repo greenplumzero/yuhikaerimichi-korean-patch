@@ -3,10 +3,10 @@
 <img alt="icon_20250919_234235" src="https://github.com/user-attachments/assets/60bdb511-3d37-4280-aff0-de50c9c3a68a" />
 
 ## 원본 게임
-[https://unityroom.com/games/yuhinokaerimiti](https://unityroom.com/games/yuhinokaerimiti)
+[夕日のかえりみち](https://unityroom.com/games/yuhinokaerimiti)
 
 ## 다운로드
-[Releases 페이지](https://github.com/greenplumzero/delores-korean-patch/releases)에서 다운로드
+[Releases 페이지](https://github.com/greenplumzero/yuhikaerimichi-korean-patch/releases)에서 다운로드
 
 ## 적용 방법
 각 폴더 별 `README.txt` 확인
@@ -23,10 +23,10 @@
 ### macOS
 ```bash
 1. ZIP 파일을 압축 해제
-2. 실행.command를 더블클릭
-3. 차단되면 YuhiKaerimichi.command [우클릭] → [열기]
-3-1. 차단되면 [설정] → [개인정보 보호 및 보안] → 맨 아래로 내려서 허용하기
-3-2. YuhiKaerimichiKoreanPatch에 대한 허용이 한 번 더 필요할 수도 있음
+2. YuhiKaerimichi.command [우클릭] → [열기]
+3. 차단되면 [설정] → [개인정보 보호 및 보안] → 맨 아래로 내려서 [그래도 열기] 클릭
+3-1. YuhiKaerimichiKoreanPatch에 대해 [설정] → [개인정보 보호 및 보안] → 맨 아래로 내려서 [그래도 허용] 클릭
+3-2. 한 번 더 YuhiKaerimichi.command 실행
 4. 원본 게임을 자동 다운로드 및 패치한 뒤 브라우저가 열림
 5. 종료는 터미널에서 Ctrl+C
 ```
