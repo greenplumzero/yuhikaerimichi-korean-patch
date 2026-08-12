@@ -254,23 +254,78 @@ def patch_extras(bundle_raw):
     logical[level_off:level_off+level_size]=level
     return build_bundle(bun,logical)
 
-def download(url):
-    req=urllib.request.Request(url,headers={'User-Agent':'Mozilla/5.0','Referer':'https://unityroom.com/'})
+def _progress_bar(label, current, total=None, width=30):
+    if total and total > 0:
+        ratio = min(1.0, current / total)
+        filled = int(width * ratio)
+        bar = "█" * filled + "░" * (width - filled)
+        pct = ratio * 100
+        text = f"\r{label} [{bar}] {pct:5.1f}%  {current / 1024 / 1024:6.1f}/{total / 1024 / 1024:6.1f} MB"
+    else:
+        text = f"\r{label} {current / 1024 / 1024:6.1f} MB 다운로드 중..."
+    print(text, end="", flush=True)
+
+def download(url, label="다운로드"):
+    req = urllib.request.Request(
+        url,
+        headers={
+            'User-Agent': 'Mozilla/5.0',
+            'Referer': 'https://unityroom.com/'
+        }
+    )
     ssl_context = ssl.create_default_context(cafile=certifi.where())
+
     with urllib.request.urlopen(req, timeout=60, context=ssl_context) as r:
-        data = r.read()
-    if data[:2]==b'\x1f\x8b':data=gzip.decompress(data)
+        total_header = r.headers.get("Content-Length")
+        total = int(total_header) if total_header and total_header.isdigit() else None
+
+        chunks = []
+        received = 0
+        chunk_size = 256 * 1024
+
+        _progress_bar(label, 0, total)
+
+        while True:
+            chunk = r.read(chunk_size)
+            if not chunk:
+                break
+            chunks.append(chunk)
+            received += len(chunk)
+            _progress_bar(label, received, total)
+
+    print()
+    data = b"".join(chunks)
+
+    if data[:2] == b'\x1f\x8b':
+        print(f"{label}: 압축 해제 중...", flush=True)
+        data = gzip.decompress(data)
+
+    print(f"{label}: 완료 ({len(data) / 1024 / 1024:.1f} MB)", flush=True)
     return data
 
 def patch_web(web,ttf):
     # only warn on hash mismatch; downloader may return identical decompressed bytes under a different transfer encoding
     h=sha256(web)
-    if h!=EXPECTED_WEB_SHA:print(f'주의: 원본 webgl.data 해시가 예상과 다릅니다: {h}')
+    if h!=EXPECTED_WEB_SHA:
+        print(f'주의: 원본 webgl.data 해시가 예상과 다릅니다: {h}')
+
+    print("  (1/5) Unity 데이터 읽는 중...", flush=True)
     bundle=extract_bundle(web)
+
+    print("  (2/5) 한국어 대사 적용 중...", flush=True)
     bundle=patch_initial_dialogue(bundle)
+
+    print("  (3/5) 한글 폰트 적용 중...", flush=True)
     bundle=patch_font(bundle,ttf)
+
+    print("  (4/5) 추가 번역 수정 적용 중...", flush=True)
     bundle=patch_extras(bundle)
-    return rebuild_webdata(web,bundle)
+
+    print("  (5/5) 게임 데이터 다시 만드는 중...", flush=True)
+    result=rebuild_webdata(web,bundle)
+
+    print("  패치 적용 완료", flush=True)
+    return result
 
 
 INDEX_HTML = r"""<!doctype html>
@@ -313,8 +368,8 @@ createUnityInstance(canvas, {
 </html>
 """
 
-def save_download(url, path):
-    data = download(url)
+def save_download(url, path, label=None):
+    data = download(url, label or path.name)
     path.write_bytes(data)
     return len(data)
 
@@ -336,15 +391,15 @@ def prepare_game(root: Path | None = None, source_webgl: Path | None = None, pat
     if not font_path.exists():
         raise RuntimeError("내장 한글 폰트를 찾을 수 없습니다.")
 
-    print("[1/4] 원본 게임 데이터 준비")
+    print("\n[1/4] 원본 게임 데이터 다운로드", flush=True)
     if source_webgl:
         web = source_webgl.read_bytes()
         if web[:2] == b"\x1f\x8b":
             web = gzip.decompress(web)
     else:
-        web = download(DATA_URL)
+        web = download(DATA_URL, "원본 게임")
 
-    print("[2/4] 한국어 대사/폰트 패치 적용")
+    print("\n[2/4] 한국어 패치 적용", flush=True)
     patched = patch_web(web, font_path.read_bytes())
     (game_dir / "webgl.data").write_bytes(patched)
 
@@ -352,13 +407,13 @@ def prepare_game(root: Path | None = None, source_webgl: Path | None = None, pat
         print(f"완료: {game_dir / 'webgl.data'}")
         return game_dir
 
-    print("[3/4] WebGL 실행 파일 다운로드")
-    save_download(LOADER_URL, game_dir / "webgl.loader.js")
-    save_download(FRAMEWORK_URL, game_dir / "webgl.framework.js")
-    save_download(WASM_URL, game_dir / "webgl.wasm")
+    print("\n[3/4] 실행에 필요한 파일 다운로드", flush=True)
+    save_download(LOADER_URL, game_dir / "webgl.loader.js", "로더")
+    save_download(FRAMEWORK_URL, game_dir / "webgl.framework.js", "프레임워크")
+    save_download(WASM_URL, game_dir / "webgl.wasm", "게임 엔진")
     (game_dir / "index.html").write_text(INDEX_HTML, encoding="utf-8")
 
-    print("[4/4] 준비 완료")
+    print("\n[4/4] 준비 완료 ✓", flush=True)
     return game_dir
 
 def serve(game_dir: Path):
