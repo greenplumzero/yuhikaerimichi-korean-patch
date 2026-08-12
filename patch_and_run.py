@@ -1,4 +1,6 @@
 from pathlib import Path
+import certifi
+import ssl
 import struct, hashlib, urllib.request, gzip, sys, os, subprocess, webbrowser, time, threading
 import lz4.block
 
