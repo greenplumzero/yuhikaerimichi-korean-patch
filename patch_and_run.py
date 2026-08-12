@@ -12,6 +12,7 @@ FRAMEWORK_URL='https://os-worker.unityroom.com/unityroom_production/game/67884/w
 WASM_URL='https://os-worker.unityroom.com/unityroom_production/game/67884/webgl/webgl.wasm.gz?h=1758218824'
 EXPECTED_WEB_SHA='ce1607f3bdb1d7d4bb8a4b164dfe7d05cc27a3cecd7b520a63fdce5d6662901a'
 MAGIC=b'UnityWebData1.0\x00'
+PATCH_VERSION='1.4-fast-cache'
 
 def sha256(b): return hashlib.sha256(b).hexdigest()
 
@@ -64,7 +65,7 @@ def build_bundle(bun,logical,dirs=None):
     block_size=1024*1024;blocks=[];compressed=[]
     for i in range(0,len(logical),block_size):
         ch=bytes(logical[i:i+block_size])
-        c=lz4.block.compress(ch,mode='high_compression',compression=9,store_size=False)
+        c=lz4.block.compress(ch,mode='fast',acceleration=1,store_size=False)
         if len(c)>=len(ch):c,fl=ch,0
         else:fl=3
         blocks.append((len(ch),len(c),fl));compressed.append(c)
@@ -72,7 +73,7 @@ def build_bundle(bun,logical,dirs=None):
     for us,cs,fl in blocks:info+=struct.pack('>IIH',us,cs,fl)
     info+=struct.pack('>I',len(dirs))
     for off,size,fl,name in dirs:info+=struct.pack('>QQI',off,size,fl)+name.encode()+b'\0'
-    cinfo=lz4.block.compress(bytes(info),mode='high_compression',compression=9,store_size=False)
+    cinfo=lz4.block.compress(bytes(info),mode='fast',acceleration=1,store_size=False)
     if len(cinfo)<len(info):info_flag=3
     else:cinfo=bytes(info);info_flag=0
     flags=(bun['flags']&~0x3f)|info_flag
@@ -383,34 +384,92 @@ def _user_data_dir() -> Path:
         return Path.home() / "Library" / "Application Support" / "YuhiKaerimichiKoreanPatch"
     return Path.home() / ".local" / "share" / "YuhiKaerimichiKoreanPatch"
 
+def _valid_original_cache(path: Path):
+    if not path.exists():
+        return False
+    try:
+        data = path.read_bytes()
+        return sha256(data) == EXPECTED_WEB_SHA
+    except Exception:
+        return False
+
+def _runtime_ready(game_dir: Path):
+    return all((game_dir / name).exists() for name in (
+        "webgl.loader.js", "webgl.framework.js", "webgl.wasm"
+    ))
+
 def prepare_game(root: Path | None = None, source_webgl: Path | None = None, patch_only: bool = False):
-    game_dir = _user_data_dir() / "game"
+    base_dir = _user_data_dir()
+    game_dir = base_dir / "game"
+    cache_dir = base_dir / "cache"
     game_dir.mkdir(parents=True, exist_ok=True)
+    cache_dir.mkdir(parents=True, exist_ok=True)
 
     font_path = _resource_dir() / "korean_font.ttf"
     if not font_path.exists():
         raise RuntimeError("내장 한글 폰트를 찾을 수 없습니다.")
 
-    print("\n[1/4] 원본 게임 데이터 다운로드", flush=True)
-    if source_webgl:
-        web = source_webgl.read_bytes()
-        if web[:2] == b"\x1f\x8b":
-            web = gzip.decompress(web)
-    else:
-        web = download(DATA_URL, "원본 게임")
+    patched_path = game_dir / "webgl.data"
+    marker_path = game_dir / "patch_version.txt"
+    original_cache = cache_dir / "original_webgl.data"
 
-    print("\n[2/4] 한국어 패치 적용", flush=True)
-    patched = patch_web(web, font_path.read_bytes())
-    (game_dir / "webgl.data").write_bytes(patched)
+    # If this exact patch version was already generated, skip download + patch completely.
+    if (
+        patched_path.exists()
+        and marker_path.exists()
+        and marker_path.read_text(encoding="utf-8", errors="ignore").strip() == PATCH_VERSION
+    ):
+        print("\n[1/4] 기존 한국어 패치 데이터 사용 ✓", flush=True)
+        print("[2/4] 패치 적용 생략 ✓", flush=True)
+    else:
+        print("\n[1/4] 원본 게임 데이터 준비", flush=True)
+
+        if source_webgl:
+            web = source_webgl.read_bytes()
+            if web[:2] == b"\x1f\x8b":
+                web = gzip.decompress(web)
+        elif _valid_original_cache(original_cache):
+            print("원본 게임: 캐시 사용 ✓", flush=True)
+            web = original_cache.read_bytes()
+        else:
+            web = download(DATA_URL, "원본 게임")
+            if sha256(web) == EXPECTED_WEB_SHA:
+                original_cache.write_bytes(web)
+                print("원본 게임: 다음 실행을 위해 캐시에 저장 ✓", flush=True)
+
+        print("\n[2/4] 한국어 패치 적용", flush=True)
+        patched = patch_web(web, font_path.read_bytes())
+        patched_path.write_bytes(patched)
+        marker_path.write_text(PATCH_VERSION, encoding="utf-8")
 
     if patch_only:
-        print(f"완료: {game_dir / 'webgl.data'}")
+        print(f"완료: {patched_path}")
         return game_dir
 
-    print("\n[3/4] 실행에 필요한 파일 다운로드", flush=True)
-    save_download(LOADER_URL, game_dir / "webgl.loader.js", "로더")
-    save_download(FRAMEWORK_URL, game_dir / "webgl.framework.js", "프레임워크")
-    save_download(WASM_URL, game_dir / "webgl.wasm", "게임 엔진")
+    print("\n[3/4] 실행에 필요한 파일 준비", flush=True)
+
+    # Download only missing runtime files. Existing ones are reused.
+    jobs = [
+        (LOADER_URL, game_dir / "webgl.loader.js", "로더"),
+        (FRAMEWORK_URL, game_dir / "webgl.framework.js", "프레임워크"),
+        (WASM_URL, game_dir / "webgl.wasm", "게임 엔진"),
+    ]
+    missing = [(u, p, l) for u, p, l in jobs if not p.exists()]
+
+    if not missing:
+        print("실행 파일: 기존 파일 사용 ✓", flush=True)
+    else:
+        # Download independent runtime files in parallel to reduce total wait time.
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        print(f"실행 파일 {len(missing)}개 병렬 다운로드 중...", flush=True)
+        with ThreadPoolExecutor(max_workers=min(3, len(missing))) as ex:
+            futures = {
+                ex.submit(save_download, url, path, label): label
+                for url, path, label in missing
+            }
+            for fut in as_completed(futures):
+                fut.result()
+
     (game_dir / "index.html").write_text(INDEX_HTML, encoding="utf-8")
 
     print("\n[4/4] 준비 완료 ✓", flush=True)
