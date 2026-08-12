@@ -32,7 +32,7 @@
 ```
 
 ## 사용된 폰트
-- [DX납량특집](https://www.sandollcloud.com/font/17064/DXHorrorSpeciaStd)
+- [학교안심 돌담](https://copyright.keris.or.kr/wft/fntDwnldView?fntGrpId=GFT202301090000000000003)
 
 ## 업데이트 내역
 **v1.0.0 - 2026-08-12**
